@@ -36,7 +36,7 @@ type client struct {
 
 var currentLiveSeries []structs.Series
 
-// 1 request per second, burst rate of 5
+// Set requests allowed per second and burst rate
 var limiter = NewIPRateLimiter(defaultRequestPerSecond, 5)
 var lastAuthentication int64 //timestamp for the last time authentication occured
 
@@ -91,14 +91,12 @@ func (i *IPRateLimiter) GetLimiter(ip string) *rate.Limiter {
 		i.mu.Unlock()
 		return i.AddIP(ip)
 	}
-
 	i.mu.Unlock()
-
 	return limiter
 }
 
 func (c *client) authenticate() error {
-	// handles authentication
+	// handles authentication with the Abios API
 
 	url := abiosBaseURL + "oauth/access_token"
 	payload := strings.NewReader("grant_type=client_credentials&client_id=" + c.userName + "&client_secret=" + c.passWord)
@@ -146,7 +144,7 @@ func (c *client) retrieveLiveSeriesData() {
 	// log.Println("expire in " + strconv.FormatInt(expires, 10))
 
 	// Returns a list of currently live series.
-	url := "https://api.abiosgaming.com/v2/series"
+	url := abiosBaseURL + "v2/series"
 	// How can I turn paramters into QueryString?
 	params := "?is_over=False&starts_before=now&sort&is_postponed=false"
 	// TODO: can I make the hardcoded url less ugly?
@@ -206,14 +204,14 @@ func (c *client) liveSeriesHandler(w http.ResponseWriter, r *http.Request) {
 		payload, err := json.MarshalIndent(currentLiveSeries, "", "\t")
 		if err != nil {
 			log.Println("Unable to marshal response")
-			return // Since we couldn't marshal proper JSON we don't want to write anything
+			return
 		}
 		w.Write(payload)
 	}
 }
 
 func (c *client) livePlayersHandler(w http.ResponseWriter, r *http.Request) {
-	// Returns a list of currently live teams.
+	// Returns a list of currently live players from cache.
 
 	currentLivePlayers := make([]structs.Player, 0)
 
@@ -232,7 +230,7 @@ func (c *client) livePlayersHandler(w http.ResponseWriter, r *http.Request) {
 		payload, err := json.MarshalIndent(currentLivePlayers, "", "\t")
 		if err != nil {
 			log.Println("Unable to marshal response")
-			return // Since we couldn't marshal proper JSON we don't want to write anything
+			return
 		}
 		w.Write(payload)
 
@@ -240,7 +238,7 @@ func (c *client) livePlayersHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *client) liveTeamsHandler(w http.ResponseWriter, r *http.Request) {
-	// Returns a list of currently live teams.
+	// Returns a list of currently live teams from cache.
 	currentLiveTeams := make([]structs.Team, 0)
 
 	for _, series := range currentLiveSeries {
@@ -258,7 +256,7 @@ func (c *client) liveTeamsHandler(w http.ResponseWriter, r *http.Request) {
 		payload, err := json.MarshalIndent(currentLiveTeams, "", "\t")
 		if err != nil {
 			log.Println("Unable to marshal response")
-			return // Since we couldn't marshal proper JSON we don't want to write anything
+			return
 		}
 		w.Write(payload)
 
@@ -274,6 +272,7 @@ func pollAbiosAPI(frequencyInSeconds int32, c *client) {
 }
 
 func limitMiddleware(next http.Handler) http.Handler {
+	// Gives a 429 error if the client is send out too many request.
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		limiter := limiter.GetLimiter(r.RemoteAddr)
@@ -291,8 +290,6 @@ func main() {
 
 	username := os.Getenv("USERNAME")
 	password := os.Getenv("PASSWORD")
-
-	fmt.Println("hello" + username + password)
 
 	resourceFetcher, err := newClient(username, password)
 
